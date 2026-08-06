@@ -18,19 +18,16 @@ def _get_reranker():
 
 def rerank_chunks(query: str, retrieved: list[RetrievedChunk], top_k: int = 5) -> list[RetrievedChunk]:
     """Rerank retrieved chunks using a cross-encoder.
-
-    Takes the top-N dense+sparse results and re-ranks them
-    for precision, returning the best `top_k`.
+    Falls back to no-op if sentence-transformers is unavailable.
     """
     if not retrieved:
         return []
 
-    reranker = _get_reranker()
-    pairs = [(query, r["chunk"]["content"]) for r in retrieved]
-    scores = reranker.predict(pairs)
-
-    ranked = sorted(zip(retrieved, scores), key=lambda x: x[1], reverse=True)
-    return [
-        {**item, "score": float(score)}
-        for item, score in ranked[:top_k]
-    ]
+    try:
+        reranker = _get_reranker()
+        pairs = [(query, r["chunk"]["content"]) for r in retrieved]
+        scores = reranker.predict(pairs)
+        ranked = sorted(zip(retrieved, scores), key=lambda x: x[1], reverse=True)
+        return [{**item, "score": float(score)} for item, score in ranked[:top_k]]
+    except ImportError:
+        return retrieved[:top_k]

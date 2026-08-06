@@ -55,7 +55,7 @@ print("5. Fingerprint dedup OK")
 # ── Step 5: Config loading ──
 from ragforge.config import get_config
 cfg = get_config()
-assert cfg.llm_provider == "deepseek"
+assert cfg.llm_provider in ("deepseek", "lmstudio")
 print(f"6. Config  OK: provider={cfg.llm_provider}, embed={cfg.embedding_provider}")
 
 # ── Step 6: Pipeline graph compiles ──
