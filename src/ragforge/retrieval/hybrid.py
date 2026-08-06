@@ -5,10 +5,26 @@ from ..pipeline import RetrievedChunk, Chunk
 
 def hybrid_retrieve(query: str, tenant_id: str, top_k: int = 20) -> list[RetrievedChunk]:
     """Two-stage retrieval: dense vectors + BM25 keywords → RRF merge."""
-    from ragforge.indexing.vector_store import search_dense
-    from ragforge.retrieval.hybrid import search_sparse
+    from ragforge.indexing.vector_store import search_dense, _get_collection
 
-    dense_results = search_dense(query, tenant_id, top_k=top_k)
+    # Convert dense results (list[tuple[id,score]]) to list[RetrievedChunk]
+    dense_raw = search_dense(query, tenant_id, top_k=top_k)
+    collection = _get_collection(tenant_id)
+    all_data = collection.get(ids=[rid for rid, _ in dense_raw]) if dense_raw else {"documents": [], "metadatas": []}
+    dense_results = [
+        {
+            "chunk": {
+                "id": rid,
+                "content": all_data["documents"][i] if i < len(all_data["documents"]) else "",
+                "doc_id": all_data["metadatas"][i].get("doc_id", "") if i < len(all_data["metadatas"]) else "",
+                "metadata": all_data["metadatas"][i] if i < len(all_data["metadatas"]) else {},
+            },
+            "score": score,
+            "source": "dense",
+        }
+        for i, (rid, score) in enumerate(dense_raw)
+    ]
+
     sparse_results = search_sparse(query, tenant_id, top_k=top_k)
 
     # Reciprocal Rank Fusion
@@ -22,37 +38,33 @@ def search_sparse(query: str, tenant_id: str, top_k: int = 20) -> list[Retrieved
     from rank_bm25 import BM25Okapi
 
     collection = _get_collection(tenant_id)
-    # Fetch all docs from the collection for BM25 indexing
     all_data = collection.get()
     if not all_data["ids"]:
         return []
 
-    # Tokenize for BM25
     docs = all_data["documents"] or []
+    ids = all_data["ids"]
+    metadatas = all_data.get("metadatas", [{}] * len(docs))
     tokenized = [d.split() for d in docs]
     bm25 = BM25Okapi(tokenized)
 
-    query_tokens = query.split()
-    scores = bm25.get_scores(query_tokens)
+    scores = bm25.get_scores(query.split())
 
-    ranked = sorted(
-        zip(all_data["ids"], scores, all_data.get("metadatas", [{}] * len(docs))),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:top_k]
+    # Sort by score and pair with doc index
+    ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
 
     return [
         {
             "chunk": {
-                "id": rid,
-                "content": docs[i] if i < len(docs) else "",
-                "doc_id": meta.get("doc_id", ""),
-                "metadata": meta,
+                "id": ids[idx],
+                "content": docs[idx],
+                "doc_id": metadatas[idx].get("doc_id", ""),
+                "metadata": metadatas[idx],
             },
             "score": score,
             "source": "sparse",
         }
-        for i, (rid, score, meta) in enumerate(ranked)
+        for idx, score in ranked
     ]
 
 
@@ -72,7 +84,6 @@ def _rrf_fuse(
 
     merged = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-    # Build lookup from original items
     lookup = {}
     for item in dense + sparse:
         if item["chunk"]["id"] not in lookup:

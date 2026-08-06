@@ -18,9 +18,10 @@ def main():
 def ingest(paths: tuple[str], tenant: str, strategy: str):
     """Ingest documents into the knowledge base."""
     from ragforge.ingestion.parser import parse_file
-    from ragforge.pipeline import run_indexing, Document
+    from ragforge.ingestion.chunker import chunk_documents
+    from ragforge.pipeline import Document
 
-    click.echo(f"Ingesting {len(paths)} file(s) into tenant '{tenant}'...")
+    click.echo(f"Ingesting {len(paths)} file(s) into tenant '{tenant}' (strategy={strategy})...")
 
     documents = []
     for p in paths:
@@ -28,8 +29,18 @@ def ingest(paths: tuple[str], tenant: str, strategy: str):
         documents.append(doc)
         click.echo(f"  parsed: {doc['metadata']['filename']} ({doc['metadata']['char_count']} chars)")
 
-    state = run_indexing(documents, tenant_id=tenant)
-    click.echo(f"Done: {len(state['chunks'])} chunks indexed.")
+    # Chunk with selected strategy, then index
+    from ragforge.pipeline import run_indexing as _run_indexing
+    # Override default chunker strategy by chunking here
+    chunks = chunk_documents(documents, strategy=strategy)
+    # Embed + index via pipeline
+    from ragforge.indexing.embedder import embed_chunks
+    from ragforge.indexing.vector_store import index_chunks
+    from ragforge.cache.embedding_cache import EmbeddingCache
+    cache = EmbeddingCache()
+    chunks = embed_chunks(chunks, cache=cache, tenant_id=tenant)
+    index_chunks(chunks, tenant_id=tenant)
+    click.echo(f"Done: {len(chunks)} chunks indexed.")
 
 
 @main.command()

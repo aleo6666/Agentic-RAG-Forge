@@ -39,18 +39,20 @@ def health():
 @app.post("/ingest")
 @rate_limiter(limit=10, window=60)
 def api_ingest(req: IngestRequest, tenant: str = Depends(require_tenant)):
-    """Ingest documents. Requires X-API-Key header."""
-    audit_log("ingest", tenant=req.tenant_id, detail=f"{len(req.paths)} files")
+    """Ingest documents. Requires X-API-Key header. Tenant from API key, not request body."""
+    from ragforge.pipeline import run_indexing, Document
+
+    audit_log("ingest", tenant=tenant, detail=f"{len(req.paths)} files")
 
     documents = []
     for p in req.paths:
         try:
-            doc = parse_file(Path(p), tenant_id=req.tenant_id)
+            doc = parse_file(Path(p), tenant_id=tenant)
             documents.append(doc)
         except Exception as e:
             raise HTTPException(400, f"Failed to parse {p}: {e}")
 
-    state = run_indexing(documents, tenant_id=req.tenant_id)
+    state = run_indexing(documents, tenant_id=tenant)
     return {
         "status": "ok",
         "chunks": len(state["chunks"]),
@@ -61,10 +63,10 @@ def api_ingest(req: IngestRequest, tenant: str = Depends(require_tenant)):
 @app.post("/ask")
 @rate_limiter(limit=30, window=60)
 def api_ask(req: AskRequest, tenant: str = Depends(require_tenant)):
-    """Query the knowledge base. Requires X-API-Key header."""
-    audit_log("ask", tenant=req.tenant_id, detail=req.question)
+    """Query the knowledge base. Requires X-API-Key header. Tenant from API key."""
+    audit_log("ask", tenant=tenant, detail=req.question)
 
-    state = run_query(req.question, tenant_id=req.tenant_id)
+    state = run_query(req.question, tenant_id=tenant)
     if state.get("errors"):
         raise HTTPException(500, str(state["errors"]))
 
