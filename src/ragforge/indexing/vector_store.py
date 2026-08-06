@@ -21,7 +21,9 @@ def _get_collection(tenant_id: str):
 
 
 def index_chunks(chunks: list[Chunk], tenant_id: str = "default") -> None:
-    """Index chunks into the tenant's vector store."""
+    """Index chunks into the tenant's vector store.
+    Reuses pre-computed embeddings attached to chunk metadata by the embed node.
+    """
     if not chunks:
         return
 
@@ -29,7 +31,11 @@ def index_chunks(chunks: list[Chunk], tenant_id: str = "default") -> None:
     ids = [c["id"] for c in chunks]
     texts = [c["content"] for c in chunks]
     metadatas = [c.get("metadata", {}) for c in chunks]
-    embeddings = [get_embedding(t) for t in texts]
+    # Reuse attached embeddings; fall back to computing on the fly
+    embeddings = [
+        c.get("metadata", {}).get("_embedding") or get_embedding(c["content"])
+        for c in chunks
+    ]
 
     collection.add(ids=ids, documents=texts, embeddings=embeddings, metadatas=metadatas)
 

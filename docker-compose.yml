@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  ragforge:
+    build: .
+    ports:
+      - "8777:8777"
+    volumes:
+      - ./chroma_data:/app/chroma_data
+      - ./cache:/app/cache
+    env_file:
+      - .env
+    restart: unless-stopped

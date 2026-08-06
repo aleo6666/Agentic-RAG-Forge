@@ -6,29 +6,27 @@ from ragforge.cache.embedding_cache import EmbeddingCache
 
 def embed_chunks(chunks: list[Chunk], cache: EmbeddingCache, tenant_id: str = "default") -> list[Chunk]:
     """Generate embeddings for chunks, skipping cached ones.
-
-    Uses sentence-transformers for local embeddings by default.
-    Falls back to configured remote provider (SiliconFlow, OpenAI-compatible).
+    Attaches vectors to chunk metadata so downstream nodes can reuse them.
     """
     from ragforge.config import get_config
 
     cfg = get_config()
-    provider = cfg.embedding_provider  # "local" | "siliconflow" | "openai"
+    provider = cfg.embedding_provider
 
     uncached = []
     for c in chunks:
         if not cache.has(c["id"]):
             uncached.append(c)
+        else:
+            c.setdefault("metadata", {})["_embedding"] = cache.get(c["id"])
 
     if uncached:
         texts = [c["content"] for c in uncached]
-        if provider == "local":
-            vectors = _embed_local(texts)
-        else:
-            vectors = _embed_remote(texts, provider)
+        vectors = _embed_local(texts) if provider == "local" else _embed_remote(texts, provider)
 
         for c, vec in zip(uncached, vectors):
             cache.set(c["id"], vec, tenant_id=tenant_id)
+            c.setdefault("metadata", {})["_embedding"] = vec
 
     return chunks
 

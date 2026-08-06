@@ -28,12 +28,18 @@ class EmbeddingCache:
         self._data: dict[str, list[float]] = self._load()
 
     def _load(self) -> dict:
-        if self._file.exists():
-            return json.loads(self._file.read_text())
+        try:
+            if self._file.exists():
+                return json.loads(self._file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass  # corrupt cache — start fresh
         return {}
 
     def _save(self) -> None:
-        self._file.write_text(json.dumps(self._data))
+        # Atomic write: tmp → rename prevents corruption on crash
+        tmp = self._file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self._data))
+        tmp.replace(self._file)
 
     def _key(self, chunk_id: str, tenant_id: str) -> str:
         return f"{tenant_id}:{chunk_id}"

@@ -6,9 +6,7 @@ Pipeline stages:
 Each stage is a LangGraph node — independently swappable, testable, and traceable.
 """
 
-from typing import TypedDict, Annotated, Sequence, Literal
-from dataclasses import dataclass, field
-import operator
+from typing import TypedDict, Literal
 
 # ponytail: lazy import — langgraph is heavy, only needed when building the graph
 def _get_graph():
@@ -113,20 +111,20 @@ def generate(state: PipelineState) -> PipelineState:
     """Generate answer with citations from reranked context."""
     from ragforge.generation.generator import generate_answer
     context_parts = [r["chunk"]["content"] for r in state["reranked"]]
-    state["context"] = "\n\n---\n\n".join(context_parts)
-    answer, citations = generate_answer(state["query"], state["context"])
-    return {**state, "answer": answer, "citations": citations}
+    context = "\n\n---\n\n".join(context_parts)
+    answer, citations = generate_answer(state["query"], context)
+    return {**state, "context": context, "answer": answer, "citations": citations}
 
 
 def evaluate(state: PipelineState) -> PipelineState:
     """Evaluate generation quality (RAGAS)."""
     from ragforge.evaluation.evaluator import evaluate_generation
     if state["answer"] and state["context"]:
-        state["evaluation"] = evaluate_generation(
+        return {**state, "evaluation": evaluate_generation(
             question=state["query"],
             answer=state["answer"],
             contexts=[r["chunk"]["content"] for r in state["reranked"]],
-        )
+        )}
     return state
 
 

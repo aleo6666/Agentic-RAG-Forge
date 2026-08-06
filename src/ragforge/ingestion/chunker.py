@@ -28,8 +28,8 @@ def chunk_by_paragraph(text: str, max_chars: int = 1000, overlap: int = 100) -> 
 
 
 def chunk_by_markdown_headers(text: str, max_chars: int = 1500) -> list[str]:
-    """Split at markdown headers (##, ###), keep sections together."""
-    sections = re.split(r"\n(?=## )", text)
+    """Split at markdown headers (#, ##, ###), keep sections together."""
+    sections = re.split(r"\n(?=#{1,3}\s)", text)
     return [s.strip() for s in sections if s.strip() and len(s.strip()) > 20]
 
 
@@ -47,7 +47,10 @@ def chunk_documents(
       - paragraph: split by double-newline (default, works for most formats)
       - markdown:  split at ## headers (best for markdown docs)
     """
-    chunker = {"paragraph": chunk_by_paragraph, "markdown": chunk_by_markdown_headers}[strategy]
+    chunkers = {"paragraph": chunk_by_paragraph, "markdown": chunk_by_markdown_headers}
+    if strategy not in chunkers:
+        raise ValueError(f"Unknown chunking strategy: {strategy!r}. Options: {list(chunkers)}")
+    chunker = chunkers[strategy]
 
     all_chunks = []
     for doc in documents:
