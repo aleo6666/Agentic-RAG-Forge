@@ -30,7 +30,10 @@ def index_chunks(chunks: list[Chunk], tenant_id: str = "default") -> None:
     collection = _get_collection(tenant_id)
     ids = [c["id"] for c in chunks]
     texts = [c["content"] for c in chunks]
-    metadatas = [c.get("metadata", {}) for c in chunks]
+    metadatas = [
+        {k: v for k, v in c.get("metadata", {}).items() if k != "_embedding"}
+        for c in chunks
+    ]
     # Reuse attached embeddings; fall back to computing on the fly
     embeddings = [
         c.get("metadata", {}).get("_embedding") or get_embedding(c["content"])

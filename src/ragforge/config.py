@@ -3,6 +3,13 @@
 import os
 from dataclasses import dataclass, field
 
+# Load .env if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 @dataclass
 class Config:

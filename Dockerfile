@@ -1,10 +1,8 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY pyproject.toml .
+COPY pyproject.toml src/ ./
 RUN pip install --no-cache-dir -e .
-
-COPY src/ src/
 
 RUN useradd --create-home ragforge && chown -R ragforge:ragforge /app
 USER ragforge

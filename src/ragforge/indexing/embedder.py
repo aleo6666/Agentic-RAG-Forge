@@ -15,10 +15,10 @@ def embed_chunks(chunks: list[Chunk], cache: EmbeddingCache, tenant_id: str = "d
 
     uncached = []
     for c in chunks:
-        if not cache.has(c["id"]):
+        if not cache.has(c["id"], tenant_id=tenant_id):
             uncached.append(c)
         else:
-            c.setdefault("metadata", {})["_embedding"] = cache.get(c["id"])
+            c.setdefault("metadata", {})["_embedding"] = cache.get(c["id"], tenant_id=tenant_id)
 
     if uncached:
         texts = [c["content"] for c in uncached]
