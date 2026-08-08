@@ -1,6 +1,18 @@
 """Hybrid retrieval: dense + BM25 → Reciprocal Rank Fusion (RRF)."""
 
+import re
+
 from ..pipeline import RetrievedChunk, Chunk
+
+# 分词：中文按单字，英文按单词/数字（零依赖，避免引入 jieba）
+_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]|[a-zA-Z0-9]+")
+
+
+def tokenize(text: str) -> list[str]:
+    """混合分词：'如何部署RAG系统' → ['如','何','部','署','RAG','系','统']"""
+    if not text:
+        return []
+    return _TOKEN_RE.findall(text.lower())
 
 
 def hybrid_retrieve(query: str, tenant_id: str, top_k: int = 20) -> list[RetrievedChunk]:
@@ -11,13 +23,15 @@ def hybrid_retrieve(query: str, tenant_id: str, top_k: int = 20) -> list[Retriev
     dense_raw = search_dense(query, tenant_id, top_k=top_k)
     collection = _get_collection(tenant_id)
     all_data = collection.get(ids=[rid for rid, _ in dense_raw]) if dense_raw else {"documents": [], "metadatas": []}
+    docs = all_data.get("documents") or []
+    metas = all_data.get("metadatas") or [{}] * len(docs)
     dense_results = [
         {
             "chunk": {
                 "id": rid,
-                "content": all_data["documents"][i] if i < len(all_data["documents"]) else "",
-                "doc_id": all_data["metadatas"][i].get("doc_id", "") if i < len(all_data["metadatas"]) else "",
-                "metadata": all_data["metadatas"][i] if i < len(all_data["metadatas"]) else {},
+                "content": docs[i] if i < len(docs) else "",
+                "doc_id": (metas[i] or {}).get("doc_id", "") if i < len(metas) else "",
+                "metadata": metas[i] if i < len(metas) else {},
             },
             "score": score,
             "source": "dense",
@@ -33,9 +47,13 @@ def hybrid_retrieve(query: str, tenant_id: str, top_k: int = 20) -> list[Retriev
 
 
 def search_sparse(query: str, tenant_id: str, top_k: int = 20) -> list[RetrievedChunk]:
-    """BM25 keyword search over indexed chunks."""
+    """BM25 keyword search over indexed chunks. 中文查询走混合分词，空文档/空查询安全。"""
     from ragforge.indexing.vector_store import _get_collection
     from rank_bm25 import BM25Okapi
+
+    query_tokens = tokenize(query)
+    if not query_tokens:
+        return []
 
     collection = _get_collection(tenant_id)
     all_data = collection.get()
@@ -44,24 +62,29 @@ def search_sparse(query: str, tenant_id: str, top_k: int = 20) -> list[Retrieved
 
     docs = all_data["documents"] or []
     ids = all_data["ids"]
-    metadatas = all_data.get("metadatas", [{}] * len(docs))
-    tokenized = [d.split() for d in docs]
+    metadatas = all_data.get("metadatas") or [{}] * len(docs)
+
+    # 过滤空文档（BM25 对空 token 列表会崩），保持 ids/metadatas 索引映射
+    kept = [(i, tokenize(d)) for i, d in enumerate(docs) if d and d.strip()]
+    if not kept:
+        return []
+    orig_idxs, tokenized = zip(*kept)
     bm25 = BM25Okapi(tokenized)
 
-    scores = bm25.get_scores(query.split())
+    scores = bm25.get_scores(query_tokens)
 
-    # Sort by score and pair with doc index
+    # Sort by score and pair with original doc index
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
 
     return [
         {
             "chunk": {
-                "id": ids[idx],
-                "content": docs[idx],
-                "doc_id": metadatas[idx].get("doc_id", ""),
-                "metadata": metadatas[idx],
+                "id": ids[orig_idxs[idx]],
+                "content": docs[orig_idxs[idx]],
+                "doc_id": (metadatas[orig_idxs[idx]] or {}).get("doc_id", "") if orig_idxs[idx] < len(metadatas) else "",
+                "metadata": metadatas[orig_idxs[idx]] if orig_idxs[idx] < len(metadatas) else {},
             },
-            "score": score,
+            "score": float(score),
             "source": "sparse",
         }
         for idx, score in ranked

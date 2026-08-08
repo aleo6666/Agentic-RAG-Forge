@@ -1,6 +1,7 @@
-"""RAG Forge CLI — ragforge ingest/ask/serve."""
+"""RAG Forge CLI — ragforge ingest/ask/agent-ask/eval-compare/serve."""
 
 import click
+import json
 from pathlib import Path
 
 
@@ -65,6 +66,76 @@ def ask(question: str, tenant: str):
 
     if state.get("evaluation"):
         click.echo(f"\nQuality: {state['evaluation']}")
+
+
+@main.command()
+@click.argument("question")
+@click.option("--tenant", "-t", default="default", help="Tenant ID")
+@click.option("--max-rounds", default=3, show_default=True, help="Max retrieval rounds")
+@click.option("--trace/--no-trace", default=True, help="Show agent decision trace")
+def agent_ask(question: str, tenant: str, max_rounds: int, trace: bool):
+    """Ask with Agentic RAG — routing, grading, query rewriting loops."""
+    from ragforge.agentic.agentic_pipeline import run_agentic_query
+
+    click.echo(f"Agent querying tenant '{tenant}': {question}")
+    state = run_agentic_query(question, tenant_id=tenant, max_rounds=max_rounds)
+
+    if trace and state.get("trace"):
+        click.echo("\n── Agent trace ──")
+        for t in state["trace"]:
+            step = t.get("step")
+            if step == "route":
+                click.echo(f"  route       → {t.get('decision')}  ({t.get('reason', '')})")
+            elif step == "retrieve":
+                click.echo(f"  retrieve    → {t.get('hits')} hits  (query: {t.get('query', '')[:60]})")
+            elif step == "grade_docs":
+                click.echo(f"  grade_docs  → {t.get('relevant')}/{t.get('total')} relevant")
+            elif step == "rewrite":
+                click.echo(f"  rewrite     → {t.get('rewritten', '')[:60]}  ({t.get('reason', '')[:40]})")
+            elif step == "generate":
+                click.echo(f"  generate    → {t.get('context_chunks')} context chunks")
+            elif step == "grade_answer":
+                click.echo(f"  grade_answer→ grounded={t.get('grounded')}  ({t.get('reason', '')[:50]})")
+            elif step == "direct":
+                click.echo("  direct      → answered without retrieval")
+            elif step == "clarify":
+                click.echo("  clarify     → asked for clarification")
+
+    click.echo(f"\n{state['answer']}\n")
+    if state.get("citations"):
+        click.echo("Sources:")
+        for c in state["citations"]:
+            click.echo(f"  - {c['snippet']}")
+
+
+@main.command()
+@click.argument("questions_file", type=click.Path(exists=True))
+@click.option("--tenant", "-t", default="default", help="Tenant ID")
+@click.option("--max-rounds", default=3, show_default=True, help="Max agentic retrieval rounds")
+def eval_compare(questions_file: str, tenant: str, max_rounds: int):
+    """Compare deterministic vs Agentic RAG with an LLM judge.
+
+    QUESTIONS_FILE: JSONL, one {"question": "...", "note": "..."} per line.
+    """
+    from ragforge.evaluation.compare import run_comparison, format_report
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    questions = []
+    with open(questions_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                questions.append(json.loads(line))
+
+    click.echo(f"Evaluating {len(questions)} questions (tenant '{tenant}', max_rounds={max_rounds})...")
+    results = run_comparison(questions, tenant_id=tenant, max_rounds=max_rounds)
+
+    report = format_report(results)
+    Console().print(Markdown(report))
+    out_path = Path(questions_file).with_suffix(".report.md")
+    out_path.write_text(report, encoding="utf-8")
+    click.echo(f"\nReport saved: {out_path}")
 
 
 @main.command()

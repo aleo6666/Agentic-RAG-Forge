@@ -5,6 +5,14 @@ import secrets
 from functools import lru_cache
 from fastapi import HTTPException, Header
 
+# Ensure .env is loaded BEFORE reading RAGFORGE_API_KEY (config.py loads it too,
+# but auth.py is often imported first — without this the key silently falls back
+# to a random value and every request 403s)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ponytail: env var + fallback to generated key
 # Rotate in production via RAGFORGE_API_KEY env

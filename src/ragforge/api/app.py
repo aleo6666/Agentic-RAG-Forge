@@ -1,7 +1,18 @@
 """RAG Forge FastAPI application."""
 
-from fastapi import FastAPI, HTTPException, Depends
+import mimetypes
+import os
+
+# Windows 下 mimetypes 可能把 .js 注册为 text/plain → 浏览器拒绝执行。
+# 显式修正常见前端 MIME。
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
+
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
@@ -30,6 +41,14 @@ class AskRequest(BaseModel):
 
 
 # ── Routes ───────────────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    """Frontend SPA when built, otherwise interactive API docs."""
+    if _DIST.exists():
+        return FileResponse(_DIST / "index.html")
+    return RedirectResponse(url="/docs")
+
 
 @app.get("/health")
 def health():
@@ -60,6 +79,103 @@ def api_ingest(req: IngestRequest, tenant: str = Depends(require_tenant)):
     }
 
 
+@app.post("/upload")
+@rate_limiter(limit=10, window=60)
+def api_upload(file: UploadFile = File(...), tenant: str = Depends(require_tenant)):
+    """Upload a document file → parse → chunk → embed → index. Requires X-API-Key."""
+    import os
+    import shutil
+    import tempfile
+
+    from ragforge.ingestion.parser import parse_file
+    from ragforge.ingestion.chunker import chunk_documents
+    from ragforge.indexing.embedder import embed_chunks
+    from ragforge.indexing.vector_store import index_chunks
+    from ragforge.cache.embedding_cache import EmbeddingCache
+
+    suffix = Path(file.filename or "upload").suffix or ".txt"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        shutil.copyfileobj(file.file, tmp)
+        tmp.close()
+        doc = parse_file(Path(tmp.name), tenant_id=tenant)
+        doc["metadata"]["filename"] = file.filename or Path(tmp.name).name
+        chunks = chunk_documents([doc])
+        cache = EmbeddingCache()
+        chunks = embed_chunks(chunks, cache=cache, tenant_id=tenant)
+        index_chunks(chunks, tenant_id=tenant)
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)
+
+    audit_log("upload", tenant=tenant, detail=file.filename or "?")
+    return {
+        "status": "ok",
+        "filename": file.filename,
+        "chars": doc["metadata"].get("char_count", 0),
+        "chunks": len(chunks),
+    }
+
+
+@app.get("/documents")
+@rate_limiter(limit=30, window=60)
+def api_documents(tenant: str = Depends(require_tenant)):
+    """List indexed documents (aggregated by doc_id)."""
+    from ragforge.indexing.vector_store import list_documents
+
+    docs = list_documents(tenant)
+    return {"status": "ok", "tenant": tenant, "documents": docs}
+
+
+@app.delete("/documents")
+@rate_limiter(limit=5, window=60)
+def api_clear_documents(tenant: str = Depends(require_tenant)):
+    """Clear the tenant's whole knowledge base."""
+    from ragforge.indexing.vector_store import clear_documents
+
+    removed = clear_documents(tenant)
+    audit_log("clear", tenant=tenant, detail=f"{removed} chunks removed")
+    return {"status": "ok", "removed_chunks": removed}
+
+
+@app.get("/config")
+@rate_limiter(limit=30, window=60)
+def api_config(tenant: str = Depends(require_tenant)):
+    """Runtime config summary (no secrets)."""
+    from ragforge.config import get_config
+
+    cfg = get_config()
+    return {
+        "status": "ok",
+        "llm_provider": cfg.llm_provider,
+        "llm_model": cfg.llm_model,
+        "llm_endpoint": cfg.llm_endpoint,
+        "embedding_provider": cfg.embedding_provider,
+        "embedding_model": cfg.embedding_model,
+        "reranker_model": cfg.reranker_model,
+        "llm_key_configured": bool(cfg.llm_api_key),
+        "embedding_key_configured": bool(cfg.embedding_api_key),
+        "api_key_configured": bool(os.getenv("RAGFORGE_API_KEY")),
+    }
+
+
+@app.post("/agent-ask")
+@rate_limiter(limit=30, window=60)
+def api_agent_ask(req: AskRequest, tenant: str = Depends(require_tenant)):
+    """Agentic query — routing, grading, rewrite loops. Requires X-API-Key header."""
+    from ragforge.agentic.agentic_pipeline import run_agentic_query
+
+    audit_log("agent_ask", tenant=tenant, detail=req.question)
+    state = run_agentic_query(req.question, tenant_id=tenant)
+
+    return {
+        "answer": state["answer"],
+        "citations": state.get("citations", []),
+        "trace": state.get("trace", []),
+        "grounded": state.get("answer_grounded"),
+    }
+
+
 @app.post("/ask")
 @rate_limiter(limit=30, window=60)
 def api_ask(req: AskRequest, tenant: str = Depends(require_tenant)):
@@ -75,3 +191,20 @@ def api_ask(req: AskRequest, tenant: str = Depends(require_tenant)):
         "citations": state.get("citations", []),
         "evaluation": state.get("evaluation", {}),
     }
+
+
+# ── Static frontend (built Vue app) ─────────────────────────────
+# Mounted only when frontend/dist exists — keeps API-only deploys working.
+
+_DIST = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def spa(full_path: str):
+        """Serve built SPA with history-fallback to index.html."""
+        file = _DIST / full_path
+        if full_path and file.is_file():
+            return FileResponse(file)
+        return FileResponse(_DIST / "index.html")

@@ -8,3 +8,6 @@ audit.jsonl*
 *.egg-info/
 dist/
 build/
+frontend/node_modules/
+frontend/dist/
+.tmp_*

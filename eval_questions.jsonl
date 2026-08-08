@@ -1,0 +1,12 @@
+{"question": "RAG Forge 的 Pipeline 分为哪几个阶段？", "note": "直接命中"}
+{"question": "RAG Forge 用什么做默认向量存储？为什么？", "note": "设计决策，含噪声文档"}
+{"question": "如何用 Docker 部署 RAG Forge？", "note": "跨文档检索"}
+{"question": "RAG Forge 的审计日志是什么格式？", "note": "细节检索"}
+{"question": "RAG Forge 的混合检索是怎么融合稠密和稀疏结果的？", "note": "技术细节，术语密集"}
+{"question": "RAG Forge 的嵌入缓存机制解决了什么问题？", "note": "概念理解"}
+{"question": "RAG Forge 的定价方案是什么？", "note": "负样本-知识库无答案"}
+{"question": "RAG Forge 如何集成飞书机器人？", "note": "负样本-知识库无答案"}
+{"question": "怎么部署？", "note": "模糊问题-泛化"}
+{"question": "缓存是怎么工作的？", "note": "模糊问题-多义"}
+{"question": "如果想新增一个 OpenSearch 向量存储后端，需要改哪些模块？", "note": "多步推理-架构理解"}
+{"question": "RAG Forge 相比传统一次性检索 RAG 有什么优势？", "note": "多步推理-对比综合"}

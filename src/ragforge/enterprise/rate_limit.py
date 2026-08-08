@@ -4,6 +4,7 @@ ponytail: in-memory dict, not Redis — single-process FastAPI, < 1000 req/s.
 Add Redis bucket if multi-worker deployment is needed.
 """
 
+import inspect
 import time
 from functools import wraps
 from fastapi import HTTPException, Request
@@ -13,9 +14,13 @@ _buckets: dict[str, tuple[int, float]] = {}  # key → (tokens, last_refill)
 
 
 def rate_limiter(limit: int = 10, window: int = 60):
-    """Decorator: allow `limit` requests per `window` seconds per tenant."""
+    """Decorator: allow `limit` requests per `window` seconds per tenant.
+    Works with both sync and async endpoint functions.
+    """
 
     def decorator(fn):
+        is_async = inspect.iscoroutinefunction(fn)
+
         @wraps(fn)
         async def wrapper(*args, **kwargs):
             request: Request = kwargs.get("request") or next(
@@ -33,7 +38,10 @@ def rate_limiter(limit: int = 10, window: int = 60):
                 raise HTTPException(429, f"Rate limit exceeded: {limit}/{window}s")
 
             _buckets[key] = (tokens - 1, now)
-            return await fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            if is_async:
+                result = await result
+            return result
 
         return wrapper
 

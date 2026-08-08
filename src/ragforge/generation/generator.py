@@ -20,7 +20,7 @@ def generate_answer(query: str, context: str) -> tuple[str, list[dict]]:
         json={
             "model": cfg.llm_model,
             "messages": [
-                {"role": "system", "content": "你是知识库助手。基于提供的上下文回答问题，引用来源。"},
+                {"role": "system", "content": "你是知识库助手。只基于提供的上下文回答问题，引用来源。不要补充上下文之外的知识；如果上下文不足，明确说明无法回答或信息不完整。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
