@@ -20,27 +20,69 @@ def _get_collection(tenant_id: str):
     return _collections[tenant_id]
 
 
-def index_chunks(chunks: list[Chunk], tenant_id: str = "default") -> None:
-    """Index chunks into the tenant's vector store.
+def index_chunks(chunks: list[Chunk], tenant_id: str = "default", dedup: bool = True) -> dict:
+    """Index chunks into the tenant's vector store — with DocumentHash incremental sync.
+
     Reuses pre-computed embeddings attached to chunk metadata by the embed node.
+    When dedup=True (default):
+      - unchanged chunks (same doc_id + same content hash) are skipped
+      - changed/removed chunks of a known doc_id are deleted first
+      - new chunks are added
+    Returns {"added": n, "skipped": n, "removed": n}.
     """
     if not chunks:
-        return
+        return {"added": 0, "skipped": 0, "removed": 0}
+
+    from ragforge.cache.embedding_cache import fingerprint
 
     collection = _get_collection(tenant_id)
-    ids = [c["id"] for c in chunks]
-    texts = [c["content"] for c in chunks]
+
+    # Hash every chunk of this batch, group by doc_id
+    batch: dict[str, set[str]] = {}
+    for c in chunks:
+        c.setdefault("metadata", {})["doc_hash"] = fingerprint(c["content"])
+        batch.setdefault(c.get("doc_id", ""), set()).add(c["metadata"]["doc_hash"])
+
+    to_delete: list[str] = []
+    existing_hashes: set[str] = set()
+    if dedup:
+        existing = collection.get(include=["metadatas"])
+        for cid, meta in zip(existing.get("ids") or [], existing.get("metadatas") or []):
+            meta = meta or {}
+            if meta.get("doc_id", "") in batch:
+                h = meta.get("doc_hash", "")
+                existing_hashes.add(h)
+                if h and h not in batch[meta["doc_id"]]:
+                    to_delete.append(cid)  # content changed or was removed
+
+    if to_delete:
+        collection.delete(ids=to_delete)
+
+    to_add = (
+        [c for c in chunks if c["metadata"]["doc_hash"] not in existing_hashes]
+        if dedup
+        else chunks
+    )
+    if not to_add:
+        return {"added": 0, "skipped": len(chunks), "removed": len(to_delete)}
+
+    ids = [c["id"] for c in to_add]
+    texts = [c["content"] for c in to_add]
     metadatas = [
-        {k: v for k, v in c.get("metadata", {}).items() if k != "_embedding"}
-        for c in chunks
+        {
+            **{k: v for k, v in c.get("metadata", {}).items() if k != "_embedding"},
+            "doc_id": c.get("doc_id", ""),  # 顶层 doc_id 写入 metadata，供检索结果归属/MRR 计算
+        }
+        for c in to_add
     ]
     # Reuse attached embeddings; fall back to computing on the fly
     embeddings = [
         c.get("metadata", {}).get("_embedding") or get_embedding(c["content"])
-        for c in chunks
+        for c in to_add
     ]
 
     collection.add(ids=ids, documents=texts, embeddings=embeddings, metadatas=metadatas)
+    return {"added": len(to_add), "skipped": len(chunks) - len(to_add), "removed": len(to_delete)}
 
 
 def search_dense(query: str, tenant_id: str, top_k: int = 10) -> list[tuple[str, float]]:
@@ -51,6 +93,21 @@ def search_dense(query: str, tenant_id: str, top_k: int = 10) -> list[tuple[str,
     ids = results["ids"][0] if results["ids"] else []
     distances = results["distances"][0] if results.get("distances") else [0] * len(ids)
     return list(zip(ids, [1.0 - d for d in distances]))  # distance → similarity
+
+
+def remove_document(doc_id: str, tenant_id: str) -> int:
+    """Remove all chunks of one document. Returns removed count.
+
+    Incremental-sync counterpart of index_chunks: add/update go through
+    index_chunks (idempotent, hash-dedup), delete goes through here — the
+    batch-based delete inside index_chunks only handles in-batch changes.
+    """
+    collection = _get_collection(tenant_id)
+    existing = collection.get(where={"doc_id": doc_id}, include=["metadatas"])
+    ids = existing.get("ids") or []
+    if ids:
+        collection.delete(ids=ids)
+    return len(ids)
 
 
 def list_documents(tenant_id: str) -> list[dict]:

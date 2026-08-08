@@ -58,23 +58,28 @@ RAG Forge 把经典 RAG 从"一次检索、一次生成"的确定性管线升级
 | **查询改写** | 检索不足时自动改写重查（≤3 轮） | 首轮失败自愈，不依赖用户重问 |
 | **答案自检** | groundedness 检查（grade_answer） | 不 grounded 自动复盘，杜绝硬编造 |
 | **澄清兜底** | clarify 路径带 best-effort 检索回答 | 模糊问题先给可用答案再要细节 |
+| **引用校验** | 生成后 LLM 校验引用真实性 | 剔除幻觉引用，citations 可审计 |
+| **增量索引** | DocumentHash 幂等入库：未变跳过、变更替换、删除精准 | 重复入库零成本，文档同步秒级 |
 | **全程可审计** | 每一步决策写入 `trace` | 决策轨迹 API/CLI/前端全程可见 |
 
 ## 📊 对比评估（确定性 vs Agentic，LLM judge 打分）
 
-12 题测试集 × 双管线 × 四指标（faithfulness / answer_relevancy / usefulness / context_precision）：
+12 题测试集（含 ground truth） × 双管线 × 六指标（faithfulness / answer_relevancy / usefulness / context_precision / **MRR / Hit@3**）：
 
 | 指标 | 确定性 | Agentic | 说明 |
 |------|:---:|:---:|------|
-| **Context Precision** | 0.63 | **0.72** | Agentic 平均每问少喂 ~1.3 个噪声文档 |
+| **MRR** | 0.80 | **0.90** | 检索首命中质量，Agent 过滤后排名更准 |
+| **Hit@3** | 0.8 | **0.9** | 期望文档进入 top3 的命中率 |
+| **Context Precision** | 0.42 | **0.64** | Agentic 平均每问少喂 ~1.4 个噪声文档 |
 | Faithfulness | 1.00 | 1.00 | 负样本零编造（诚实回答"知识库无此信息"） |
-| Answer Relevancy | 0.99 | 0.99 | 持平 |
-| Usefulness | 0.89 | 0.88 | 持平（小知识库下基线已足够好） |
+| Answer Relevancy | 1.00 | 1.00 | 持平 |
+| Usefulness | 0.88 | 0.84 | 持平（小知识库下基线已足够好） |
 
-**关键发现**（评估驱动了 4 个真实 bug 修复）：
+**关键发现**（评估驱动了 5 个真实 bug 修复）：
 - 负样本下基线管线曾**编造**不存在的集成方案（Faith 0.00），Agentic 的 rewrite 循环确认"知识库确实没有"后诚实回答
 - grade 截断 500→2000 字符修复：LLM judge 信息不足导致的文档误杀（Faith 0.00→1.00）
 - 生成器 grounding 强化：抑制上下文之外的"知识填充"（Faith 0.70→1.00）
+- Q4 审计日志题：基线 MRR 0.25（未命中）→ Agent 1.00（精准命中期望文档）
 
 ```bash
 ragforge eval-compare eval_questions.jsonl   # 可复现，自动生成 markdown 报告
@@ -137,9 +142,9 @@ tests/              # 17 个测试（Agentic 决策逻辑 + 混合检索）
 
 ## ✅ 质量验证
 
-- **17/17 pytest 全绿**：Agentic 决策循环（改写/自检/预算兜底/clarify）+ 检索单元
+- **18/18 pytest 全绿**：Agentic 决策循环（改写/自检/预算兜底/clarify）+ 检索单元 + DocumentHash 增量索引
 - **浏览器实操验收**：上传→问答→轨迹→清空 全流程
-- **对比评估可复现**：12 题测试集 + 自动报告
+- **对比评估可复现**：12 题带 ground truth 测试集 + MRR/Hit@3 检索指标 + 自动报告
 
 ## License
 

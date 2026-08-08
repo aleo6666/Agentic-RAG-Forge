@@ -33,7 +33,7 @@ from ragforge.agentic.grader import make_grade_documents, make_grade_answer
 
 RetrieverFn = Callable[[str, str, int], list[RetrievedChunk]]
 RerankerFn = Callable[[str, list[RetrievedChunk], int], list[RetrievedChunk]]
-GeneratorFn = Callable[[str, str], tuple[str, list[dict]]]
+GeneratorFn = Callable[..., tuple[str, list[dict]]]
 
 
 def _default_retriever(query: str, tenant_id: str, top_k: int = 20) -> list[RetrievedChunk]:
@@ -48,10 +48,10 @@ def _default_reranker(query: str, retrieved: list[RetrievedChunk], top_k: int = 
     return rerank_chunks(query, retrieved, top_k=top_k)
 
 
-def _default_generator(query: str, context: str) -> tuple[str, list[dict]]:
+def _default_generator(query: str, context: str, **kwargs) -> tuple[str, list[dict]]:
     from ragforge.generation.generator import generate_answer
 
-    return generate_answer(query, context)
+    return generate_answer(query, context, **kwargs)
 
 
 def build_agentic_pipeline(
@@ -95,7 +95,7 @@ def build_agentic_pipeline(
         if not context_parts:
             answer, citations = "知识库中没有找到相关信息。", []
         else:
-            answer, citations = generator(state["query"], context)
+            answer, citations = generator(state["query"], context, citation_check=True)
 
         return {
             **state,

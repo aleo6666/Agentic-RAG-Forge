@@ -59,7 +59,7 @@ def fake_reranker(query, retrieved, top_k=5):
     return retrieved[:top_k]
 
 
-def fake_generator(query, context):
+def fake_generator(query, context, **kwargs):
     return "基于上下文的测试答案。", [{"source": "chunk_0", "snippet": context[:60]}]
 
 

@@ -2,12 +2,21 @@
 
 from ragforge.config import get_config
 
+CITATION_CHECK_SYSTEM = """你是引用校验器。用户给出【回答】和【引用片段】列表。
+判断每个引用片段是否真实支撑回答中的论断（被回答实际使用、内容确实支撑）。
+只输出 JSON：{"valid_indexes": [有效引用编号数组], "reason": "一句话说明"}
+如果回答没有使用该片段的内容，或片段与论断无关，则该引用无效。"""
 
-def generate_answer(query: str, context: str) -> tuple[str, list[dict]]:
+
+def generate_answer(
+    query: str, context: str, citation_check: bool = False
+) -> tuple[str, list[dict]]:
     """Generate an answer grounded in the provided context.
 
     Returns (answer_text, citations_list).
     Each citation = {"source": doc_id, "snippet": relevant_text}.
+    When citation_check=True, citations are LLM-validated — hallucinated or
+    unused references are filtered out (one extra LLM call).
     """
     cfg = get_config()
     import httpx
@@ -33,7 +42,30 @@ def generate_answer(query: str, context: str) -> tuple[str, list[dict]]:
 
     # Extract citations from context
     citations = _extract_citations(answer, context)
+    if citation_check:
+        from ragforge.agentic.llm import default_llm, llm_json
+
+        citations = _validate_citations(answer, citations, llm_json, default_llm)
     return answer, citations
+
+
+def _validate_citations(answer: str, citations: list[dict], llm_json, llm) -> list[dict]:
+    """LLM 校验每个引用是否真实支撑回答论断，剔除幻觉引用。"""
+    if not citations:
+        return citations
+    doc_list = "\n\n".join(f"[{i}] {c['snippet']}" for i, c in enumerate(citations))
+    result = llm_json(
+        llm,
+        CITATION_CHECK_SYSTEM,
+        [{"role": "user", "content": f"【回答】\n{answer[:2000]}\n\n【引用片段】\n{doc_list}"}],
+    )
+    valid = set()
+    for item in result.get("valid_indexes", []):
+        try:
+            valid.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return [c for i, c in enumerate(citations) if i in valid]
 
 
 def _build_prompt(query: str, context: str) -> str:

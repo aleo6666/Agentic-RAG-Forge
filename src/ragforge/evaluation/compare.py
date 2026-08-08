@@ -44,6 +44,25 @@ def _as_int_list(raw) -> list[int]:
     return out
 
 
+def _doc_of(chunk: dict) -> tuple[str, str]:
+    """Return (doc_id, filename) of a retrieved chunk for ground-truth matching."""
+    c = chunk.get("chunk", chunk)
+    meta = c.get("metadata") or {}
+    return meta.get("doc_id", "") or c.get("doc_id", ""), meta.get("filename", "")
+
+
+def mrr_hit_at_k(chunks: list[dict], expected_docs: list[str], k: int = 3) -> tuple[float | None, bool | None]:
+    """MRR + Hit@k against ground-truth doc list. Returns (None, None) for negative samples."""
+    if not expected_docs:
+        return None, None
+    expected = set(expected_docs)
+    for rank, item in enumerate(chunks, start=1):
+        doc_id, fname = _doc_of(item)
+        if doc_id in expected or fname in expected:
+            return round(1.0 / rank, 4), rank <= k
+    return 0.0, False
+
+
 def judge_answer(question: str, answer: str, contexts: list[str], llm: LLMCallFn | None = None) -> dict:
     """Score an answer against its context with the LLM judge."""
     llm = llm or default_llm
@@ -108,40 +127,48 @@ def run_comparison(
 
         # ── Baseline: deterministic pipeline ──
         base_state = run_query(q, tenant_id=tenant_id)
-        base_contexts = [r["chunk"]["content"] for r in base_state.get("reranked", [])[:5]]
+        base_chunks = base_state.get("reranked", [])[:5]
+        base_contexts = [r["chunk"]["content"] for r in base_chunks]
         base_answer = base_state.get("answer", "")
         base_metrics = judge_answer(q, base_answer, base_contexts, llm=llm)
         base_metrics["context_precision"] = judge_context_precision(q, base_contexts, llm=llm)
+        base_mrr, base_hit = mrr_hit_at_k(base_chunks, item.get("expected_docs", []))
 
         # ── Agentic pipeline ──
         ag_state = run_agentic_query(q, tenant_id=tenant_id, max_rounds=max_rounds)
         ag_graded = ag_state.get("graded", [])
         if ag_graded:
             relevant = [g for g in ag_graded if g.get("relevant")]
-            ag_contexts = [g["chunk"]["content"] for g in relevant] or [
-                g["chunk"]["content"] for g in ag_graded
-            ]
+            ag_chunks = relevant or ag_graded
+            ag_contexts = [g["chunk"]["content"] for g in ag_chunks]
         else:
             # clarify best-effort / fallback 路径没有 graded — 从 state["context"] 还原
+            ag_chunks = []
             ag_contexts = [c for c in ag_state.get("context", "").split("\n\n---\n\n") if c.strip()]
         ag_answer = ag_state.get("answer", "")
         ag_metrics = judge_answer(q, ag_answer, ag_contexts, llm=llm)
         ag_metrics["context_precision"] = judge_context_precision(q, ag_contexts, llm=llm)
+        ag_mrr, ag_hit = mrr_hit_at_k(ag_chunks, item.get("expected_docs", []))
 
         results.append(
             {
                 "question": q,
                 "note": note,
+                "expected_docs": item.get("expected_docs", []),
                 "agent_trace": [t["step"] for t in ag_state.get("trace", [])],
                 "baseline": {
                     "answer": base_answer,
                     "contexts": len(base_contexts),
                     "metrics": base_metrics,
+                    "mrr": base_mrr,
+                    "hit_at_k": base_hit,
                 },
                 "agentic": {
                     "answer": ag_answer,
                     "contexts": len(ag_contexts),
                     "metrics": ag_metrics,
+                    "mrr": ag_mrr,
+                    "hit_at_k": ag_hit,
                 },
             }
         )
@@ -152,21 +179,28 @@ def run_comparison(
 def format_report(results: list[dict]) -> str:
     """Render the comparison as a markdown report."""
     lines = ["# RAG Forge — 确定性 vs Agentic RAG 对比评估\n"]
-    lines.append(f"| # | 问题 | 管线 | Faith | Rel | Use | CtxP | 检索ctx |")
-    lines.append(f"|---|------|------|-------|-----|-----|------|--------|")
+    lines.append("| # | 问题 | 管线 | Faith | Rel | Use | CtxP | MRR | Hit@3 | 检索ctx |")
+    lines.append("|---|------|------|-------|-----|-----|------|-----|-------|--------|")
 
     rows = []
-    base_avg = {"faithfulness": [], "answer_relevancy": [], "usefulness": [], "context_precision": []}
+    base_avg = {"faithfulness": [], "answer_relevancy": [], "usefulness": [], "context_precision": [], "mrr": [], "hit": []}
     ag_avg = {k: [] for k in base_avg}
 
     for i, r in enumerate(results, 1):
         for tag, rec, avg in (("基础", r["baseline"], base_avg), ("Agent", r["agentic"], ag_avg)):
             m = rec["metrics"]
-            for k in avg:
+            for k in ("faithfulness", "answer_relevancy", "usefulness", "context_precision"):
                 avg[k].append(m[k])
+            if rec.get("mrr") is not None:
+                avg["mrr"].append(rec["mrr"])
+            if rec.get("hit_at_k") is not None:
+                avg["hit"].append(1 if rec["hit_at_k"] else 0)
+            mrr = f"{rec['mrr']:.2f}" if rec.get("mrr") is not None else "—"
+            hit = "✓" if rec.get("hit_at_k") else ("✗" if rec.get("hit_at_k") is not None else "—")
             rows.append(
-                f"| {i} | {r['question'][:28]} | {tag} | {m['faithfulness']:.2f} | "
-                f"{m['answer_relevancy']:.2f} | {m['usefulness']:.2f} | {m['context_precision']:.2f} | {rec['contexts']} |"
+                f"| {i} | {r['question'][:24]} | {tag} | {m['faithfulness']:.2f} | "
+                f"{m['answer_relevancy']:.2f} | {m['usefulness']:.2f} | {m['context_precision']:.2f} | "
+                f"{mrr} | {hit} | {rec['contexts']} |"
             )
 
     lines.extend(rows)
@@ -177,14 +211,17 @@ def format_report(results: list[dict]) -> str:
 
     lines.append("| **平均** | | **基础** | "
                  f"{_avg(base_avg['faithfulness']):.2f} | {_avg(base_avg['answer_relevancy']):.2f} | "
-                 f"{_avg(base_avg['usefulness']):.2f} | {_avg(base_avg['context_precision']):.2f} | |")
+                 f"{_avg(base_avg['usefulness']):.2f} | {_avg(base_avg['context_precision']):.2f} | "
+                 f"{_avg(base_avg['mrr']):.2f} | {round(_avg(base_avg['hit']), 2)} | |")
     lines.append("| | | **Agent** | "
                  f"{_avg(ag_avg['faithfulness']):.2f} | {_avg(ag_avg['answer_relevancy']):.2f} | "
-                 f"{_avg(ag_avg['usefulness']):.2f} | {_avg(ag_avg['context_precision']):.2f} | |")
+                 f"{_avg(ag_avg['usefulness']):.2f} | {_avg(ag_avg['context_precision']):.2f} | "
+                 f"{_avg(ag_avg['mrr']):.2f} | {round(_avg(ag_avg['hit']), 2)} | |")
     lines.append("")
 
-    for r in results:
+    for i, r in enumerate(results, 1):
         lines.append(f"**Q{i}** ({r['note']}): {r['question']}")
+        lines.append(f"- 期望文档: {', '.join(r.get('expected_docs', [])) or '（无，负样本）'}")
         lines.append(f"- 决策轨迹: {' → '.join(r['agent_trace'])}")
         base_reason = r["baseline"]["metrics"]["reason"]
         ag_reason = r["agentic"]["metrics"]["reason"]
