@@ -26,6 +26,9 @@ from ragforge.enterprise.rate_limit import rate_limiter
 app = FastAPI(title="RAG Forge", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# 多轮会话：把最近 N 轮（每轮 = 一问一答）历史注入生成 prompt
+HISTORY_ROUNDS = 4
+
 
 # ── Request Models ───────────────────────────────────────────────
 
@@ -38,6 +41,12 @@ class IngestRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str
     tenant_id: str = "default"
+
+
+class ChatRequest(BaseModel):
+    session_id: Optional[str] = None
+    question: str
+    tenant_id: str = "default"  # 与 /agent-ask 一致：tenant 以 API key 为准，此字段仅占位
 
 
 # ── Routes ───────────────────────────────────────────────────────
@@ -190,6 +199,61 @@ def api_ask(req: AskRequest, tenant: str = Depends(require_tenant)):
         "answer": state["answer"],
         "citations": state.get("citations", []),
         "evaluation": state.get("evaluation", {}),
+    }
+
+
+@app.post("/session")
+@rate_limiter(limit=30, window=60)
+def api_create_session(tenant: str = Depends(require_tenant)):
+    """Create a new conversation session. Requires X-API-Key header."""
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    session_id = store.create_session(tenant_id=tenant)
+    audit_log("session_create", tenant=tenant, detail=session_id)
+    return {"session_id": session_id}
+
+
+@app.post("/chat")
+@rate_limiter(limit=30, window=60)
+def api_chat(req: ChatRequest, tenant: str = Depends(require_tenant)):
+    """Multi-turn agentic chat. Requires X-API-Key header.
+
+    Without ``session_id`` a new session is created. The most recent
+    ``HISTORY_ROUNDS`` turns are injected into the generation prompt so the
+    answer can reference prior context. Returns the answer plus citations,
+    trace, grounding verdict, session id and round count.
+    """
+    from ragforge.agentic.agentic_pipeline import run_agentic_query
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+
+    session_id = req.session_id
+    if session_id:
+        if not store.session_exists(session_id):
+            raise HTTPException(404, f"Session not found: {session_id}")
+    else:
+        session_id = store.create_session(tenant_id=tenant)
+
+    # 最近 N 轮历史（本轮之前），用于注入生成 prompt
+    history = store.recent_messages(session_id, limit=HISTORY_ROUNDS * 2)
+
+    # 先落库用户消息，再生成（生成失败也能保留问题）
+    store.append_message(session_id, "user", req.question)
+
+    audit_log("chat", tenant=tenant, detail=req.question)
+    state = run_agentic_query(req.question, tenant_id=tenant, history=history)
+
+    store.append_message(session_id, "assistant", state.get("answer", ""))
+
+    return {
+        "answer": state.get("answer", ""),
+        "citations": state.get("citations", []),
+        "trace": state.get("trace", []),
+        "grounded": state.get("answer_grounded"),
+        "session_id": session_id,
+        "rounds": store.round_count(session_id),
     }
 
 

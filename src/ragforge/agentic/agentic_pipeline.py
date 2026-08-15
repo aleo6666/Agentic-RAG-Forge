@@ -211,17 +211,42 @@ def run_agentic_query(
     query: str,
     tenant_id: str = "default",
     max_rounds: int = 3,
+    history: list[dict] | None = None,
     **deps,
 ) -> AgenticState:
-    """Run the agentic query end-to-end. ``deps`` overrides LLM/retriever/reranker/generator."""
+    """Run the agentic query end-to-end. ``deps`` overrides LLM/retriever/reranker/generator.
+
+    ``history`` is a list of prior turns ``[{"role": "user"/"assistant", "content": ...}]``.
+    It is injected only at generation time — the graph structure and every node's
+    decision logic stay untouched. We wrap the generator so the history rides
+    along as an extra kwarg into ``generate_answer``.
+    """
+    if history:
+        base = deps.pop("generator", _default_generator)
+
+        def history_generator(q: str, context: str, **kwargs):
+            return base(q, context, history=history, **kwargs)
+
+        deps["generator"] = history_generator
+
+        # Contextualize the query so router/rewrite/retrieve all see a
+        # self-contained question ("它有什么优点？" → "RAG 有什么优点？").
+        # The original question stays in state for audit/trace display.
+        llm = deps.get("llm") or default_llm
+        from ragforge.agentic.contextualizer import make_contextualize_query
+
+        contextualized = make_contextualize_query(llm)(query, history)
+
     graph = build_agentic_pipeline(max_rounds=max_rounds, **deps).compile()
+    invoke_query = contextualized if history else query
     return graph.invoke(
         {
-            "query": query,
+            "query": invoke_query,
             "tenant_id": tenant_id,
             "retrieval_rounds": 0,
             "max_rounds": max_rounds,
             "trace": [],
             "errors": [],
+            **({"original_query": query, "contextualized_query": contextualized} if history else {}),
         }
     )

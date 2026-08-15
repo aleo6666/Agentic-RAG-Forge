@@ -9,19 +9,25 @@ CITATION_CHECK_SYSTEM = """你是引用校验器。用户给出【回答】和�
 
 
 def generate_answer(
-    query: str, context: str, citation_check: bool = False
+    query: str,
+    context: str,
+    history: list[dict] | None = None,
+    citation_check: bool = False,
 ) -> tuple[str, list[dict]]:
     """Generate an answer grounded in the provided context.
 
     Returns (answer_text, citations_list).
     Each citation = {"source": doc_id, "snippet": relevant_text}.
+    ``history`` is an optional list of prior turns
+    ``[{"role": "user"/"assistant", "content": ...}]`` — injected into the
+    prompt so the answer can reference earlier conversation context.
     When citation_check=True, citations are LLM-validated — hallucinated or
     unused references are filtered out (one extra LLM call).
     """
     cfg = get_config()
     import httpx
 
-    prompt = _build_prompt(query, context)
+    prompt = _build_prompt(query, context, history=history)
 
     resp = httpx.post(
         f"{cfg.llm_endpoint}/chat/completions",
@@ -68,15 +74,23 @@ def _validate_citations(answer: str, citations: list[dict], llm_json, llm) -> li
     return [c for i, c in enumerate(citations) if i in valid]
 
 
-def _build_prompt(query: str, context: str) -> str:
-    return f"""基于以下上下文回答问题。如果上下文不足，请明确说明。
+def _build_prompt(query: str, context: str, history: list[dict] | None = None) -> str:
+    sections = ["基于以下上下文回答问题。如果上下文不足，请明确说明。"]
+    if history:
+        sections.append(_format_history(history))
+    sections.append(f"上下文：\n{context}")
+    sections.append(f"问题：{query}")
+    sections.append("请用中文回答，引用具体的上下文来源。")
+    return "\n\n".join(sections)
 
-上下文：
-{context}
 
-问题：{query}
-
-请用中文回答，引用具体的上下文来源。"""
+def _format_history(history: list[dict]) -> str:
+    """Render alternating user/assistant turns as a readable dialogue block."""
+    lines = ["对话历史（本轮问题之前）："]
+    for msg in history:
+        label = "用户" if msg.get("role") == "user" else "助手"
+        lines.append(f"{label}：{msg.get('content', '')}")
+    return "\n".join(lines)
 
 
 def _extract_citations(answer: str, context: str) -> list[dict]:

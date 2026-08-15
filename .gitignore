@@ -4,6 +4,7 @@ __pycache__/
 .env
 chroma_data/
 cache/
+data/
 audit.jsonl*
 *.egg-info/
 dist/

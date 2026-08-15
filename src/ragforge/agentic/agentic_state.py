@@ -21,6 +21,8 @@ class AgenticState(TypedDict, total=False):
     # Input
     query: str
     tenant_id: str
+    original_query: str
+    contextualized_query: str
 
     # Agent decisions
     route_decision: Literal["retrieve", "direct", "clarify"]

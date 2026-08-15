@@ -36,7 +36,7 @@ def make_route_query(llm: LLMCallFn):
             + [
                 {
                     "step": "route",
-                    "query": q,
+                    "query": state.get("original_query") or q,
                     "decision": action,
                     "reason": result.get("reason", ""),
                 }
