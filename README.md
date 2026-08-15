@@ -87,16 +87,50 @@ ragforge eval-compare eval_questions.jsonl   # 可复现，自动生成 markdown
 
 ## 🖥️ Web 控制台（Vue 3）
 
-浏览器打开 `http://127.0.0.1:8777` —— 三页完整应用：
+浏览器打开 `http://127.0.0.1:8777` —— 六页完整应用：
 
 - **💬 对话**：Agentic/标准双模式切换，决策轨迹时间线可视化（路由→检索→评分→改写→自检），grounded 徽标，来源引用
 - **📚 知识库**：拖拽上传（自动解析→切分→向量化→入库），文档列表，一键清空
+- **🗂 会话**：客服对话全量留痕，会话列表 + 完整对话详情（轮数/消息）
+- **❓ 未命中**：Agent 确认答不上来的问题自动入库（知识库补料的直接依据）
+- **🎫 工单**：转人工咨询闭环管理，"标记已解决"一键完结
 - **⚙️ 系统**：健康状态、LLM/Embedding 配置摘要、API Key 管理
 
 ```
-POST /agent-ask  → {answer, trace, grounded, citations}   # Agentic 问答
-POST /upload     → multipart 文件入库
-GET  /documents  → 文档聚合列表     DELETE /documents → 清空
+POST /session      → {session_id}                              # 创建会话
+POST /chat         → {answer, trace, grounded, session_id, rounds}  # 多轮对话
+GET  /sessions     → 会话列表          GET /sessions/{id} → 会话详情
+GET  /missed-questions → 未命中问题    POST /tickets → 转人工工单
+GET  /tickets      → 工单列表          PATCH /tickets/{id} → 标记已解决
+POST /agent-ask    → {answer, trace, grounded, citations}      # 单轮 Agentic
+POST /upload       → multipart 文件入库
+GET  /documents    → 文档聚合列表      DELETE /documents → 清空
+```
+
+## 💬 智能客服升级（多轮会话 + 人机协同 + 运营闭环）
+
+在 Agentic RAG 之上叠加会话层，从"单轮问答"升级为"有记忆、会转人工、懂运营"的智能客服：
+
+| 能力 | 实现 | 效果 |
+|------|------|------|
+| **多轮会话** | SQLite 会话存储（`sessions`/`messages` 表）+ 最近 4 轮历史注入生成 prompt | 追问带上下文，不重复解释 |
+| **指代消解** | 入口 contextualize：历史+当前问题压缩为自包含 query | "它有什么优点？" → "RAG 有什么优点？"，路由/检索/改写全受益 |
+| **未命中收集** | 检索触顶 + 无相关文档 → 自动入库（显式信号，不依赖 grounded 判定） | 知识库补料有据可依，运营闭环 |
+| **转人工工单** | 无答案时挂件提供"转人工"，工单表 + 状态流转 | 人机协同，咨询不丢失 |
+| **可嵌入挂件** | `widget/` 纯原生 JS（IIFE 零污染、rf- 前缀防冲突），两行代码接入任意网页 | 一行 `<script>` 即得客服 |
+
+**多轮评估（无记忆 vs 有记忆，3 场景 × 追问指代）**：
+
+| 指标 | 无记忆 | 有记忆 |
+|------|:---:|:---:|
+| 直接回答（无澄清前缀） | **1/3** | **3/3** |
+| 命中主题 | 3/3（靠 clarify 兜底猜测） | 3/3（直接命中） |
+
+关键证据：指代追问（"它有什么优点？"/"那它的缓存机制呢？"）无记忆全部走澄清兜底（"您指的是哪个产品？"），甚至检索方向错误（"没有找到缓存机制说明"）；有记忆直接命中目标主题（Embedding 缓存路径、RAG 核心优点）。
+
+```bash
+PYTHONPATH=src python scripts/eval_multi_turn.py   # 可复现多轮评估
+cd widget && python serve.py                       # 挂件演示 → http://localhost:8080/demo.html
 ```
 
 ## 🚀 快速开始
@@ -127,7 +161,8 @@ ragforge serve                             # → http://127.0.0.1:8777
 
 ```
 src/ragforge/
-├── agentic/        # Agentic 决策层（路由/改写/评分/自检/LLM helper）
+├── agentic/        # Agentic 决策层（路由/改写/评分/自检/contextualizer）
+├── session/        # 会话存储（SQLite，多轮记忆 + 未命中 + 工单）
 ├── pipeline.py     # 确定性 RAG 管线（8 节点 LangGraph）
 ├── ingestion/      # 解析器 + 切分器
 ├── indexing/       # Embedding + 向量存储（Chroma/Qdrant）
@@ -136,8 +171,9 @@ src/ragforge/
 ├── evaluation/     # LLM judge 对比评估
 ├── enterprise/     # 多租户 / 鉴权 / 审计 / 限流
 └── api/            # FastAPI + SPA 托管
-frontend/           # Vue 3 控制台（对话/知识库/系统）
-tests/              # 17 个测试（Agentic 决策逻辑 + 混合检索）
+frontend/           # Vue 3 控制台（对话/知识库/会话/未命中/工单/系统）
+widget/             # 可嵌入客服挂件（原生 JS，两行接入）
+tests/              # 46 个测试（Agentic 决策 + 混合检索 + 会话 + 未命中 + 工单）
 ```
 
 ## ✅ 质量验证
