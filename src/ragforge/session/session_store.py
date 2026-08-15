@@ -34,6 +34,20 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
+
+CREATE TABLE IF NOT EXISTS missed_questions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    question   TEXT NOT NULL,
+    tenant_id  TEXT NOT NULL DEFAULT 'default',
+    created_at TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'new'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_missed_session_question
+    ON missed_questions(session_id, question);
+CREATE INDEX IF NOT EXISTS idx_missed_tenant_created
+    ON missed_questions(tenant_id, created_at DESC);
 """
 
 
@@ -145,3 +159,43 @@ class SessionStore:
                 (session_id,),
             ).fetchone()
         return row[0]
+
+    # ── Missed questions ───────────────────────────────────────
+
+    def record_missed_question(
+        self, session_id: str, question: str, tenant_id: str = "default"
+    ) -> bool:
+        """Record a question the agent could not answer.
+
+        Deduplicated by (session_id, question) — the same question asked again
+        in the same session is not re-recorded. Returns True if newly inserted,
+        False if it was a duplicate.
+        """
+        with self._db() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO missed_questions "
+                "(session_id, question, tenant_id, created_at, status) "
+                "VALUES (?, ?, ?, ?, 'new')",
+                (session_id, question, tenant_id, _now()),
+            )
+        return cur.rowcount > 0
+
+    def list_missed_questions(
+        self, tenant_id: str | None = None, status: str | None = None
+    ) -> list[dict]:
+        """List missed questions, newest first, optionally filtered by tenant/status."""
+        where, params = [], []
+        if tenant_id is not None:
+            where.append("tenant_id = ?")
+            params.append(tenant_id)
+        if status is not None:
+            where.append("status = ?")
+            params.append(status)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        sql = (
+            "SELECT id, session_id, question, tenant_id, created_at, status "
+            f"FROM missed_questions {clause} ORDER BY created_at DESC"
+        )
+        with self._db() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]

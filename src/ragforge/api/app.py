@@ -247,6 +247,20 @@ def api_chat(req: ChatRequest, tenant: str = Depends(require_tenant)):
 
     store.append_message(session_id, "assistant", state.get("answer", ""))
 
+    # 未命中问题自动收集：仅当「确认知识库无答案」时记录 —— 检索路由 +
+    # rewrite 循环触顶（retrieval_rounds 用尽）且最终无任何相关文档。
+    # 注意：不能用 answer_grounded 判定 —— 系统对"诚实回答无答案"也会判
+    # grounded=True（回答完全基于上下文，未编造）。未命中的可靠信号是
+    # 「检索用尽 + 无相关文档」。
+    graded = state.get("graded") or []
+    retrieval_exhausted = (
+        state.get("route_decision") == "retrieve"
+        and state.get("retrieval_rounds", 0) >= state.get("max_rounds", 3)
+        and not any(g.get("relevant") for g in graded)
+    )
+    if retrieval_exhausted:
+        store.record_missed_question(session_id, req.question, tenant_id=tenant)
+
     return {
         "answer": state.get("answer", ""),
         "citations": state.get("citations", []),
@@ -255,6 +269,21 @@ def api_chat(req: ChatRequest, tenant: str = Depends(require_tenant)):
         "session_id": session_id,
         "rounds": store.round_count(session_id),
     }
+
+
+@app.get("/missed-questions")
+@rate_limiter(limit=30, window=60)
+def api_missed_questions(status: Optional[str] = None, tenant: str = Depends(require_tenant)):
+    """List unanswered questions (operations closed loop). Requires X-API-Key header.
+
+    Tenant-scoped: only this tenant's missed questions are returned, newest
+    first. Optional ``?status=new`` filters to unresolved items.
+    """
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    items = store.list_missed_questions(tenant_id=tenant, status=status)
+    return {"status": "ok", "tenant": tenant, "missed_questions": items}
 
 
 # ── Static frontend (built Vue app) ─────────────────────────────
