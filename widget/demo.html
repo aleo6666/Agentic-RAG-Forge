@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  RAGForgeWidget 演示页 —— 模拟「云帆 SaaS 平台」官网，右下角嵌入智能客服挂件
+
+  【如何配置 apiBase / apiKey】（三选一，优先级从高到低）
+  1. URL 参数： demo.html?apiKey=你的key&apiBase=http://localhost:8777
+  2. 修改本文件底部 new RAGForgeWidget({...}) 的构造参数
+  3. 什么都不配：首次点开挂件会弹出「连接设置」窗口，
+     输入后自动存入 localStorage，刷新不丢失
+
+  【前置条件】
+  - 后端已启动：项目根目录执行 `ragforge serve`（默认 http://127.0.0.1:8777）
+  - API Key 在后端 .env 的 RAGFORGE_API_KEY 中（示例默认值 ragforge-dev-change-me）
+
+  【启动本页】
+  - 在 widget/ 目录执行： python serve.py       （或 python -m http.server 8080）
+  - 浏览器打开：          http://localhost:8080/demo.html
+  - 注意：直接双击以 file:// 打开会触发浏览器跨域限制（Origin: null），
+    部分浏览器下 fetch 会被拦截，因此演示请走静态服务方式。
+
+  【冒烟路径】打开页面 → 点右下角气泡 → 自动创建会话 → 连续提问 3 轮
+  → 观察多轮上下文是否连贯（assistant 可引用前文）。
+  ═══════════════════════════════════════════════════════════════════
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>云帆 SaaS 平台 — 让企业服务更智能</title>
+  <link rel="stylesheet" href="./widget.css">
+  <style>
+    /* ── 演示官网自身样式（与挂件无关） ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+      color: #1f2937;
+      background: #fff;
+      line-height: 1.6;
+    }
+    a { text-decoration: none; color: inherit; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* 页头导航 */
+    .site-header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid #eef0f4;
+    }
+    .site-header .container {
+      display: flex; align-items: center; justify-content: space-between; height: 64px;
+    }
+    .logo { font-size: 20px; font-weight: 700; color: #4f46e5; letter-spacing: 1px; }
+    .logo span { color: #1f2937; }
+    .nav { display: flex; gap: 32px; font-size: 15px; color: #4b5563; }
+    .nav a:hover { color: #4f46e5; }
+    .btn-nav {
+      background: #4f46e5; color: #fff; padding: 8px 20px;
+      border-radius: 8px; font-size: 14px;
+    }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(160deg, #eef2ff 0%, #faf5ff 55%, #fff 100%);
+      padding: 96px 0 80px; text-align: center;
+    }
+    .hero h1 { font-size: 44px; font-weight: 800; letter-spacing: 1px; }
+    .hero h1 em { font-style: normal; color: #4f46e5; }
+    .hero p { margin: 20px auto 0; max-width: 620px; color: #6b7280; font-size: 17px; }
+    .hero-actions { margin-top: 36px; display: flex; gap: 16px; justify-content: center; }
+    .btn-primary {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff;
+      padding: 13px 34px; border-radius: 10px; font-size: 16px; font-weight: 500;
+      box-shadow: 0 8px 20px rgba(79,70,229,.3);
+    }
+    .btn-secondary {
+      background: #fff; color: #4f46e5; border: 1px solid #c7d2fe;
+      padding: 13px 34px; border-radius: 10px; font-size: 16px;
+    }
+
+    /* 特性卡片 */
+    .features { padding: 80px 0; }
+    .section-title { text-align: center; font-size: 30px; font-weight: 700; }
+    .section-sub { text-align: center; color: #6b7280; margin-top: 12px; }
+    .feature-grid {
+      margin-top: 48px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px;
+    }
+    .feature-card {
+      border: 1px solid #eef0f4; border-radius: 14px; padding: 30px 26px;
+      transition: box-shadow .2s ease, transform .2s ease; background: #fff;
+    }
+    .feature-card:hover { box-shadow: 0 12px 32px rgba(15,23,42,.08); transform: translateY(-3px); }
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      background: #eef2ff; color: #4f46e5;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 700;
+    }
+    .feature-card h3 { margin-top: 18px; font-size: 18px; }
+    .feature-card p { margin-top: 10px; color: #6b7280; font-size: 14px; }
+
+    /* 产品介绍段落 */
+    .about { background: #f8fafc; padding: 80px 0; }
+    .about-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+    .about h2 { font-size: 28px; font-weight: 700; }
+    .about p { margin-top: 16px; color: #4b5563; font-size: 15px; }
+    .about-stats { display: flex; gap: 40px; margin-top: 32px; }
+    .stat b { font-size: 28px; color: #4f46e5; }
+    .stat div { font-size: 13px; color: #6b7280; margin-top: 4px; }
+    .about-visual {
+      border-radius: 16px; min-height: 300px;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,.9); font-size: 15px; letter-spacing: 2px;
+      box-shadow: 0 20px 48px rgba(79,70,229,.25);
+    }
+    @media (max-width: 768px) {
+      .about-inner { grid-template-columns: 1fr; }
+      .nav { display: none; }
+      .hero h1 { font-size: 32px; }
+    }
+
+    /* 页脚 */
+    .site-footer { background: #111827; color: #9ca3af; padding: 48px 0 32px; }
+    .footer-grid { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
+    .footer-grid h4 { color: #f9fafb; font-size: 15px; margin-bottom: 14px; }
+    .footer-grid li { list-style: none; font-size: 13px; margin-top: 8px; }
+    .footer-bottom {
+      margin-top: 40px; padding-top: 20px; border-top: 1px solid #1f2937;
+      font-size: 12px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 页头导航 -->
+  <header class="site-header">
+    <div class="container">
+      <a class="logo" href="#">云帆<span>·YunFan</span></a>
+      <nav class="nav">
+        <a href="#features">产品</a>
+        <a href="#about">解决方案</a>
+        <a href="#">定价</a>
+        <a href="#">开发者文档</a>
+      </nav>
+      <a class="btn-nav" href="#">免费试用</a>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>让每一次客户咨询<br>都有<em>可追溯</em>的智能回答</h1>
+      <p>云帆 SaaS 平台基于 Agentic RAG 引擎，为企业知识库提供意图路由、检索自评估、答案溯源一体化能力。点击右下角气泡，立即体验由同一引擎驱动的智能客服。</p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="#">立即体验</a>
+        <a class="btn-secondary" href="#about">了解产品</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 产品特性 -->
+  <section class="features" id="features">
+    <div class="container">
+      <h2 class="section-title">核心能力</h2>
+      <p class="section-sub">从"一次检索一次生成"升级为可决策、可反思、可审计的 Agentic 链路</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">路</div>
+          <h3>意图智能路由</h3>
+          <p>LLM 三路决策：知识库检索 / 直接回答 / 澄清追问。闲聊不浪费检索算力，模糊问题先给可用答案再要细节。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">检</div>
+          <h3>混合检索 + 自评估</h3>
+          <p>稠密向量与 BM25 融合召回，Rerank 精排；检索不足时自动改写查询重试，最多 3 轮自愈，不靠用户重问。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">源</div>
+          <h3>答案溯源与审计</h3>
+          <p>每条回答附带引用来源与 groundedness 校验，决策轨迹全程可审计；未命中问题自动收集，形成运营闭环。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 产品介绍 -->
+  <section class="about" id="about">
+    <div class="container about-inner">
+      <div>
+        <h2>为企业知识库而生</h2>
+        <p>云帆平台将企业文档、产品手册、历史工单统一接入多租户知识库。上传即索引，提问即回答——所有回答严格基于您的文档生成，答不上来时诚实说明并自动记录，而不是编造。</p>
+        <p>多轮会话能力让客服对话上下文连贯：客户可以追问"那第二个方案呢"、"它的价格是多少"，系统都能准确理解指代。</p>
+        <div class="about-stats">
+          <div class="stat"><b>≤3 轮</b><div>检索自愈重试</div></div>
+          <div class="stat"><b>100%</b><div>回答可溯源</div></div>
+          <div class="stat"><b>多租户</b><div>数据隔离</div></div>
+        </div>
+      </div>
+      <div class="about-visual">产品截图占位</div>
+    </div>
+  </section>
+
+  <!-- 页脚 -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <h4>云帆 SaaS 平台</h4>
+          <ul><li>让企业服务更智能</li><li>本页为 RAGForgeWidget 演示页</li></ul>
+        </div>
+        <div>
+          <h4>产品</h4>
+          <ul><li>智能客服</li><li>知识库管理</li><li>运营闭环</li></ul>
+        </div>
+        <div>
+          <h4>支持</h4>
+          <ul><li>开发者文档</li><li>API 参考</li><li>联系 sales@yunfan.example</li></ul>
+        </div>
+      </div>
+      <div class="footer-bottom">© 2026 云帆 YunFan Inc. · 演示页面，非真实产品</div>
+    </div>
+  </footer>
+
+  <!-- ═══════════ RAGForgeWidget 嵌入代码（两行即可接入任意网页） ═══════════ -->
+  <script src="./widget.js"></script>
+  <script>
+    (function () {
+      // 支持 URL 参数覆盖：demo.html?apiKey=xxx&apiBase=http://localhost:8777
+      var params = new URLSearchParams(location.search);
+      new RAGForgeWidget({
+        apiBase: params.get('apiBase') || 'http://localhost:8777',
+        apiKey: params.get('apiKey') || '', // 留空 → 首次打开挂件弹出设置窗口
+        title: '云帆智能客服',
+        placeholder: '请输入您的问题…'
+      }).mount(); // 不传选择器 → 自动注入到 <body> 右下角
+    })();
+  </script>
+</body>
+</html>

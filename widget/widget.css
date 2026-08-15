@@ -1,0 +1,551 @@
+/* ============================================================
+ * RAGForgeWidget — 挂件样式
+ * 所有类名带 rf- 前缀，避免污染宿主页样式。
+ * ============================================================ */
+
+.rf-widget,
+.rf-widget *,
+.rf-widget *::before,
+.rf-widget *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.rf-widget {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2937;
+  -webkit-font-smoothing: antialiased;
+}
+
+.rf-widget button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+.rf-widget svg {
+  display: block;
+}
+
+/* ── 悬浮气泡按钮 ─────────────────────────────── */
+
+.rf-bubble {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 99999;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  animation: rf-bubble-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.rf-bubble:hover {
+  transform: scale(1.08);
+  box-shadow: 0 10px 28px rgba(79, 70, 229, 0.5);
+}
+
+.rf-bubble-icon {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.rf-bubble-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.rf-icon-close {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.6);
+}
+
+.rf-bubble-open .rf-icon-chat {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.6);
+}
+
+.rf-bubble-open .rf-icon-close {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes rf-bubble-in {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
+}
+
+/* ── 聊天窗口 ─────────────────────────────────── */
+
+.rf-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 99999;
+  width: 360px;
+  height: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px);
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform-origin: bottom right;
+  opacity: 0;
+  transform: translateY(16px) scale(0.96);
+  visibility: hidden;
+  transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+}
+
+.rf-panel.rf-open {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+
+/* ── 头部 ─────────────────────────────────────── */
+
+.rf-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #fff;
+}
+
+.rf-header-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.rf-header-sub {
+  font-size: 12px;
+  opacity: 0.82;
+  margin-top: 2px;
+}
+
+.rf-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.rf-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.rf-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.rf-icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ── 消息区 ───────────────────────────────────── */
+
+.rf-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 14px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rf-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.rf-messages::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.rf-msg {
+  display: flex;
+  gap: 8px;
+  animation: rf-msg-in 0.22s ease;
+}
+
+@keyframes rf-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.rf-msg-user {
+  justify-content: flex-end;
+}
+
+.rf-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.rf-avatar svg {
+  width: 15px;
+  height: 15px;
+}
+
+.rf-msg-main {
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.rf-msg-user .rf-msg-main {
+  align-items: flex-end;
+}
+
+.rf-msg-bubble {
+  padding: 9px 13px;
+  border-radius: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+.rf-msg-assistant .rf-msg-bubble {
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-top-left-radius: 4px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.rf-msg-user .rf-msg-bubble {
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  color: #fff;
+  border-top-right-radius: 4px;
+}
+
+.rf-msg-error .rf-msg-bubble {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-top-left-radius: 4px;
+}
+
+/* 元信息行：徽标 / 轮次 / 时间戳 */
+
+.rf-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  padding: 0 2px;
+}
+
+.rf-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.rf-badge-grounded {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.rf-badge-ungrounded {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.rf-rounds,
+.rf-time {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* 转人工（UI 占位） */
+
+.rf-human-btn {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  padding: 4px 12px;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.rf-human-btn:hover {
+  background: #e0e7ff;
+}
+
+.rf-human-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.rf-error-action {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  background: #fff;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.rf-error-action:hover {
+  background: #fef2f2;
+}
+
+/* 加载中（三点动画） */
+
+.rf-typing {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 20px;
+}
+
+.rf-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a5b4fc;
+  animation: rf-dot-bounce 1.2s infinite ease-in-out;
+}
+
+.rf-dot:nth-child(2) { animation-delay: 0.15s; }
+.rf-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes rf-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30%           { transform: translateY(-5px); opacity: 1; }
+}
+
+/* ── 输入区 ───────────────────────────────────── */
+
+.rf-input-area {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+}
+
+.rf-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  max-height: 96px;
+  outline: none;
+  background: #f8fafc;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.rf-input:focus {
+  border-color: #818cf8;
+  background: #fff;
+}
+
+.rf-input:disabled {
+  opacity: 0.6;
+}
+
+.rf-send-btn {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.rf-send-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.rf-send-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rf-send-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ── 设置弹窗 ─────────────────────────────────── */
+
+.rf-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s;
+}
+
+.rf-modal-mask.rf-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.rf-modal {
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
+  transform: translateY(10px);
+  transition: transform 0.2s ease;
+}
+
+.rf-modal-mask.rf-open .rf-modal {
+  transform: none;
+}
+
+.rf-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.rf-modal-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.rf-field {
+  display: block;
+  margin-top: 14px;
+}
+
+.rf-field-label {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 5px;
+}
+
+.rf-field-input {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.rf-field-input:focus {
+  border-color: #818cf8;
+}
+
+.rf-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.rf-btn {
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.rf-btn-ghost {
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.rf-btn-ghost:hover {
+  background: #e5e7eb;
+}
+
+.rf-btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+}
+
+.rf-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* ── 移动端：全屏 ─────────────────────────────── */
+
+@media (max-width: 480px) {
+  .rf-panel {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    transform-origin: center bottom;
+  }
+}
