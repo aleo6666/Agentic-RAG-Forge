@@ -48,4 +48,13 @@ export const api = {
   },
   documents: () => request('/documents'),
   clearDocuments: () => request('/documents', { method: 'DELETE' }),
+  // ── 智能客服运营闭环 ──
+  sessions: () => request('/sessions'),
+  sessionDetail: (id) => request(`/sessions/${encodeURIComponent(id)}`),
+  missedQuestions: (status) =>
+    request(status ? `/missed-questions?status=${encodeURIComponent(status)}` : '/missed-questions'),
+  tickets: (status) =>
+    request(status ? `/tickets?status=${encodeURIComponent(status)}` : '/tickets'),
+  resolveTicket: (id) =>
+    request(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) }),
 }

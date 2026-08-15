@@ -161,6 +161,13 @@ th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--bo
 th { color: var(--text-dim); font-weight: 500; }
 .empty { text-align: center; color: var(--text-dim); padding: 40px 0; }
 
+/* ── 运营页（会话 / 未命中 / 工单）── */
+.badge.warn { color: var(--yellow); background: rgba(210,153,34,.12); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+tr.clickable { cursor: pointer; transition: background .15s; }
+tr.clickable:hover { background: rgba(76,201,240,.06); }
+
 /* ── 系统页 ── */
 .sys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 760px) { .sys-grid { grid-template-columns: 1fr; } }
