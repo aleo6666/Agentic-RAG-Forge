@@ -245,3 +245,51 @@ def test_create_session_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("RAGFORGE_SESSION_DB", str(tmp_path / "sessions.db"))
     result = asyncio.run(api_create_session(tenant="test-tenant"))
     assert result["session_id"]
+
+
+# ── ⑥ 会话查询端点 ─────────────────────────────────────────────
+
+def test_list_sessions_endpoint(monkeypatch, tmp_path):
+    from ragforge.api.app import api_list_sessions
+
+    monkeypatch.setenv("RAGFORGE_SESSION_DB", str(tmp_path / "sessions.db"))
+    store = SessionStore(db_path=tmp_path / "sessions.db")
+    store.create_session(tenant_id="t1")
+    store.create_session(tenant_id="t1")
+    store.create_session(tenant_id="t2")
+
+    result = asyncio.run(api_list_sessions(tenant="t1"))
+    assert len(result["sessions"]) == 2
+    assert result["tenant"] == "t1"
+
+
+def test_session_detail_endpoint(monkeypatch, tmp_path):
+    from ragforge.api.app import api_session_detail
+
+    db = tmp_path / "sessions.db"
+    monkeypatch.setenv("RAGFORGE_SESSION_DB", str(db))
+    store = SessionStore(db_path=db)
+    sid = store.create_session(tenant_id="t1")
+    store.append_message(sid, "user", "什么是RAG？")
+    store.append_message(sid, "assistant", "RAG是检索增强生成。")
+
+    result = asyncio.run(api_session_detail(sid, tenant="t1"))
+    assert result["rounds"] == 1
+    assert [m["role"] for m in result["messages"]] == ["user", "assistant"]
+    assert result["messages"][0]["content"] == "什么是RAG？"
+
+
+def test_session_detail_tenant_scoped_404(monkeypatch, tmp_path):
+    from ragforge.api.app import api_session_detail
+
+    db = tmp_path / "sessions.db"
+    monkeypatch.setenv("RAGFORGE_SESSION_DB", str(db))
+    store = SessionStore(db_path=db)
+    sid = store.create_session(tenant_id="t1")
+
+    import pytest as _pytest
+    from fastapi import HTTPException
+
+    with _pytest.raises(HTTPException) as exc:
+        asyncio.run(api_session_detail(sid, tenant="t2"))
+    assert exc.value.status_code == 404

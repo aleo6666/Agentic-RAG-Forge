@@ -281,6 +281,40 @@ def api_chat(req: ChatRequest, tenant: str = Depends(require_tenant)):
     }
 
 
+@app.get("/sessions")
+@rate_limiter(limit=30, window=60)
+def api_list_sessions(tenant: str = Depends(require_tenant)):
+    """List the tenant's conversation sessions, newest first. Requires X-API-Key header."""
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    items = store.list_sessions(tenant_id=tenant)
+    return {"status": "ok", "tenant": tenant, "sessions": items}
+
+
+@app.get("/sessions/{session_id}")
+@rate_limiter(limit=30, window=60)
+def api_session_detail(session_id: str, tenant: str = Depends(require_tenant)):
+    """Session detail: full message history + round count. Tenant-scoped (404 if not found/not yours)."""
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    if not store.session_exists(session_id):
+        raise HTTPException(404, f"Session not found: {session_id}")
+    # 租户校验：session 必须是本租户的（list_sessions 按租户过滤，查不到即非本租户）
+    owned = [s for s in store.list_sessions(tenant_id=tenant) if s["id"] == session_id]
+    if not owned:
+        raise HTTPException(404, f"Session not found: {session_id}")
+    messages = store.recent_messages(session_id, limit=200)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "tenant": tenant,
+        "rounds": store.round_count(session_id),
+        "messages": messages,
+    }
+
+
 @app.get("/missed-questions")
 @rate_limiter(limit=30, window=60)
 def api_missed_questions(status: Optional[str] = None, tenant: str = Depends(require_tenant)):
