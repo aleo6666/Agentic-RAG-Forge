@@ -48,6 +48,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_missed_session_question
     ON missed_questions(session_id, question);
 CREATE INDEX IF NOT EXISTS idx_missed_tenant_created
     ON missed_questions(tenant_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    question    TEXT NOT NULL,
+    answer_meta TEXT,
+    contact     TEXT,
+    tenant_id   TEXT NOT NULL DEFAULT 'default',
+    created_at  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_session_question
+    ON tickets(session_id, question);
+CREATE INDEX IF NOT EXISTS idx_tickets_tenant_created
+    ON tickets(tenant_id, created_at DESC);
 """
 
 
@@ -199,3 +215,70 @@ class SessionStore:
         with self._db() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Tickets (human handoff) ────────────────────────────────
+
+    def create_ticket(
+        self,
+        session_id: str,
+        question: str,
+        tenant_id: str = "default",
+        contact: str | None = None,
+        answer_meta: str | None = None,
+    ) -> int:
+        """Create a human-handoff ticket and return its id.
+
+        Deduplicated by (session_id, question) — re-raising the same question
+        in the same session is idempotent and returns the existing ticket id.
+        """
+        with self._db() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO tickets "
+                "(session_id, question, answer_meta, contact, tenant_id, created_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'open')",
+                (session_id, question, answer_meta, contact, tenant_id, _now()),
+            )
+            if cur.rowcount > 0:
+                return cur.lastrowid
+            row = conn.execute(
+                "SELECT id FROM tickets WHERE session_id = ? AND question = ?",
+                (session_id, question),
+            ).fetchone()
+            return row["id"]
+
+    def list_tickets(
+        self, tenant_id: str | None = None, status: str | None = None
+    ) -> list[dict]:
+        """List tickets, newest first, optionally filtered by tenant/status."""
+        where, params = [], []
+        if tenant_id is not None:
+            where.append("tenant_id = ?")
+            params.append(tenant_id)
+        if status is not None:
+            where.append("status = ?")
+            params.append(status)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        sql = (
+            "SELECT id, session_id, question, answer_meta, contact, "
+            f"tenant_id, created_at, status FROM tickets {clause} ORDER BY created_at DESC"
+        )
+        with self._db() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def resolve_ticket(self, ticket_id: int, tenant_id: str) -> bool:
+        """Mark a ticket resolved. Tenant-scoped: returns False if the ticket
+        does not exist or belongs to another tenant (idempotent if already
+        resolved)."""
+        with self._db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM tickets WHERE id = ? AND tenant_id = ?",
+                (ticket_id, tenant_id),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE tickets SET status = 'resolved' WHERE id = ? AND tenant_id = ?",
+                (ticket_id, tenant_id),
+            )
+        return True

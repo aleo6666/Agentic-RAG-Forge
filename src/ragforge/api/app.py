@@ -49,6 +49,16 @@ class ChatRequest(BaseModel):
     tenant_id: str = "default"  # 与 /agent-ask 一致：tenant 以 API key 为准，此字段仅占位
 
 
+class TicketCreateRequest(BaseModel):
+    session_id: str
+    question: str
+    contact: Optional[str] = None
+
+
+class TicketUpdateRequest(BaseModel):
+    status: str
+
+
 # ── Routes ───────────────────────────────────────────────────────
 
 @app.get("/")
@@ -284,6 +294,63 @@ def api_missed_questions(status: Optional[str] = None, tenant: str = Depends(req
     store = SessionStore()
     items = store.list_missed_questions(tenant_id=tenant, status=status)
     return {"status": "ok", "tenant": tenant, "missed_questions": items}
+
+
+@app.post("/tickets")
+@rate_limiter(limit=30, window=60)
+def api_create_ticket(req: TicketCreateRequest, tenant: str = Depends(require_tenant)):
+    """Create a human-handoff ticket (status 'open'). Requires X-API-Key header.
+
+    Deduplicated by (session_id, question): re-raising the same question in the
+    same session returns the existing ticket id.
+    """
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    if not store.session_exists(req.session_id):
+        raise HTTPException(404, f"Session not found: {req.session_id}")
+
+    ticket_id = store.create_ticket(
+        req.session_id, req.question, tenant_id=tenant, contact=req.contact
+    )
+    audit_log("ticket_create", tenant=tenant, detail=req.question)
+    return {"ticket_id": ticket_id}
+
+
+@app.get("/tickets")
+@rate_limiter(limit=30, window=60)
+def api_list_tickets(status: Optional[str] = None, tenant: str = Depends(require_tenant)):
+    """List the tenant's tickets, newest first. Requires X-API-Key header.
+
+    Optional ``?status=open`` filters to unresolved tickets.
+    """
+    from ragforge.session.session_store import SessionStore
+
+    store = SessionStore()
+    items = store.list_tickets(tenant_id=tenant, status=status)
+    return {"status": "ok", "tenant": tenant, "tickets": items}
+
+
+@app.patch("/tickets/{ticket_id}")
+@rate_limiter(limit=30, window=60)
+def api_resolve_ticket(
+    ticket_id: int, req: TicketUpdateRequest, tenant: str = Depends(require_tenant)
+):
+    """Mark a ticket resolved. Requires X-API-Key header.
+
+    Tenant-scoped: 404 if the ticket does not exist or belongs to another tenant.
+    """
+    from ragforge.session.session_store import SessionStore
+
+    if req.status != "resolved":
+        raise HTTPException(400, "Only 'resolved' status is supported")
+
+    store = SessionStore()
+    if not store.resolve_ticket(ticket_id, tenant_id=tenant):
+        raise HTTPException(404, f"Ticket not found: {ticket_id}")
+
+    audit_log("ticket_resolve", tenant=tenant, detail=str(ticket_id))
+    return {"status": "ok", "ticket_id": ticket_id, "ticket_status": "resolved"}
 
 
 # ── Static frontend (built Vue app) ─────────────────────────────
